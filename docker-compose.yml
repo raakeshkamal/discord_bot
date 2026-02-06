@@ -1,0 +1,26 @@
+version: '3.8'
+
+services:
+  mcp-server:
+    build: ./mcp-server
+    container_name: mcp_server
+    ports:
+      - "8000:8000"
+    volumes:
+      - bot_data:/app/data
+    restart: always
+
+  discord-bot:
+    build: ./discord-bot
+    container_name: discord_bot
+    environment:
+      - DISCORD_TOKEN=${DISCORD_TOKEN}
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
+      - OPENROUTER_MODEL=${OPENROUTER_MODEL}
+      - MCP_SERVER_URL=http://mcp-server:8000/mcp
+    depends_on:
+      - mcp-server
+    restart: always
+
+volumes:
+  bot_data:
