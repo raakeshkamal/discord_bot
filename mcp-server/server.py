@@ -3,6 +3,8 @@ import sqlite3
 import os
 from datetime import datetime
 from typing import List, Dict, Any
+import requests
+from bs4 import BeautifulSoup
 
 mcp = FastMCP("Weight Tracker MCP Server")
 
@@ -93,5 +95,80 @@ def delete_all_weights() -> str:
     return f"Deleted {deleted_count} records"
 
 
+@mcp.tool
+def get_history_today() -> str:
+    """Get interesting historical events that happened on this day in history.
+
+    Scrapes Wikipedia's "On this day" page to find events, births, and deaths.
+
+    Returns:
+        A formatted summary of historical events for today with emojis
+    """
+    url = "https://en.wikipedia.org/wiki/Wikipedia:On_this_day/Today"
+
+    try:
+        # Add User-Agent header to avoid being blocked
+        headers = {
+            "User-Agent": "DiscordBot/1.0 (https://github.com/discord/discordpy; version 1.0)"
+        }
+
+        response = requests.get(url, timeout=10, headers=headers)
+        response.raise_for_status()
+
+        soup = BeautifulSoup(response.text, "html.parser")
+        facts = []
+
+        # Find the main content area
+        content = soup.find("div", class_="mw-parser-output")
+        if not content:
+            return "facing difficulties"
+
+        # Get first <ul> for events (5 items)
+        events_ul = None
+        for ul in content.find_all("ul", recursive=False):
+            if ul.find("li"):
+                # Make sure this is the events list (not the navigation links)
+                first_li = ul.find("li")
+                if first_li:
+                    events_ul = ul
+                    break
+
+        if events_ul:
+            for item in events_ul.find_all("li", limit=5):
+                text = item.get_text().strip()
+                facts.append(f"📅 {text}")
+
+        # Find hlist div for births/deaths
+        hlist_divs = content.find_all("div", class_="hlist")
+
+        # Extract births and deaths (2 each)
+        births = []
+        deaths = []
+
+        for hlist_div in hlist_divs:
+            for li in hlist_div.find_all("li"):
+                text = li.get_text().strip()
+                if "b." in text or "born" in text.lower():
+                    if len(births) < 2:
+                        births.append(text)
+                elif "d." in text or "died" in text.lower():
+                    if len(deaths) < 2:
+                        deaths.append(text)
+
+        # Add to facts
+        for birth in births:
+            facts.append(f"👶 {birth}")
+        for death in deaths:
+            facts.append(f"🕯️ {death}")
+
+        if facts:
+            return "\n".join(facts)
+        else:
+            return "facing difficulties"
+
+    except Exception as e:
+        return "facing difficulties"
+
+
 if __name__ == "__main__":
-    mcp.run(transport="http", port=8000)
+    mcp.run(transport="http", host="0.0.0.0", port=8000)

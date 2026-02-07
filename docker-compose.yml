@@ -10,6 +10,7 @@ services:
       - bot_data:/app/data
     restart: always
 
+
   discord-bot:
     build: ./discord-bot
     container_name: discord_bot

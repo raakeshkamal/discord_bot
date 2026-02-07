@@ -82,6 +82,12 @@ async def delete_all_data_tool():
     return await call_mcp_tool("delete_all_weights", {})
 
 
+@tool
+async def get_history_today_tool():
+    """Get interesting historical events that happened on this day in history."""
+    return await call_mcp_tool("get_history_today", {})
+
+
 # Setup Intents
 intents = discord.Intents.default()
 intents.message_content = True
@@ -167,6 +173,7 @@ llm = ChatOpenAI(
 
 tools = [
     get_current_weather_london,
+    get_history_today_tool,
     record_weight_tool,
     get_last_weight_tool,
     get_weight_history_tool,
@@ -177,7 +184,8 @@ prompt = ChatPromptTemplate.from_messages(
     [
         (
             "system",
-            "You are a helpful AI assistant. You can help with various tasks including weight tracking, checking the weather in London, and other general inquiries. "
+            "You are a helpful AI assistant. You can help with various tasks including weight tracking, checking the weather in London, learning about historical events that happened on this day, and other general inquiries. "
+            "When users ask about today in history, use the get_history_today_tool to get interesting facts. "
             "When showing weight history, also mention that you can generate a graph if they use the !plot command explicitly (as I cannot generate images directly yet). "
             "Be encouraging and supportive.",
         ),
@@ -435,11 +443,13 @@ async def on_message(message):
         output = response.get("output")
         if output:
             await message.channel.send(output)
+            logger.info(f"Sent response to {message.author}: {output}")
     except Exception as e:
         logger.error(f"Agent error: {e}")
         await message.channel.send(
             "I'm having a bit of trouble thinking right now. Please try again."
         )
+        logger.info(f"Sent error response to {message.author}: {message.content}")
 
 
 if __name__ == "__main__":
