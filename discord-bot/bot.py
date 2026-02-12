@@ -95,6 +95,12 @@ async def next_rust_topic_tool():
 
 
 @tool
+async def reset_rust_progress_tool():
+    """Reset the user's Rust learning progress. Use this functionality ONLY when the user explicitly asks to start over or reset their progress."""
+    return await call_mcp_tool("reset_rust_progress", {})
+
+
+@tool
 async def get_history_today_tool():
     """Get interesting historical events that happened on this day in history."""
     return await call_mcp_tool("get_history_today", {})
@@ -217,6 +223,7 @@ weight_tools = [
 rust_tools = [
      get_rust_topic_tool,
      next_rust_topic_tool,
+     reset_rust_progress_tool,
 ]
 
 # Define User Modes
@@ -253,6 +260,7 @@ personas = {
             "You are a Rust Programming Tutor (Crab Mode 🦀). Your goal is to teach the user Rust. "
             "Use `next_rust_topic_tool` when the user wants to learn or advance. "
             "Use `get_rust_topic_tool` to check progress. "
+            "Use `reset_rust_progress_tool` if the user wants to start over. "
             "Explain concepts clearly with code examples. Be encouraging and use crab emojis! 🦀 "
             "If the user asks about other topics, suggest `!mode general`."
         ),
