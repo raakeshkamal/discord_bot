@@ -6,10 +6,7 @@ services:
     container_name: mcp_server
     ports:
       - "8000:8000"
-    volumes:
-      - bot_data:/app/data
     restart: always
-
 
   discord-bot:
     build: ./discord-bot
@@ -23,5 +20,3 @@ services:
       - mcp-server
     restart: always
 
-volumes:
-  bot_data:

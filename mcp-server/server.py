@@ -1,14 +1,16 @@
 from fastmcp import FastMCP
 import sqlite3
 import os
+import json
 from datetime import datetime
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 import requests
 from bs4 import BeautifulSoup
 
 mcp = FastMCP("Weight Tracker MCP Server")
 
 DB_PATH = os.environ.get("DB_PATH", "data/weight.db")
+CURRICULUM_PATH = os.environ.get("CURRICULUM_PATH", "data/rust_curriculum.json")
 
 os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
 
@@ -21,8 +23,23 @@ def init_db():
                   weight REAL NOT NULL,
                   unit TEXT NOT NULL,
                   timestamp DATETIME DEFAULT CURRENT_TIMESTAMP)""")
+    c.execute("""CREATE TABLE IF NOT EXISTS rust_progress
+                 (id INTEGER PRIMARY KEY CHECK (id = 1),
+                  current_topic_index INTEGER DEFAULT 0,
+                  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP)""")
+    # Initialize progress row if it doesn't exist
+    c.execute("INSERT OR IGNORE INTO rust_progress (id, current_topic_index) VALUES (1, 0)")
     conn.commit()
     conn.close()
+
+
+def load_curriculum() -> List[Dict[str, Any]]:
+    """Load the Rust curriculum from JSON file."""
+    try:
+        with open(CURRICULUM_PATH, 'r') as f:
+            return json.load(f)
+    except FileNotFoundError:
+        return []
 
 
 init_db()
@@ -93,6 +110,124 @@ def delete_all_weights() -> str:
     conn.commit()
     conn.close()
     return f"Deleted {deleted_count} records"
+
+
+@mcp.tool
+def get_rust_topic() -> Dict[str, Any]:
+    """Get the current Rust topic the user is learning.
+
+    Returns:
+        The current topic details including index, section, title, explanation, and hint.
+        Also includes progress information (current topic number and total topics).
+    """
+    curriculum = load_curriculum()
+    if not curriculum:
+        return {"error": "Curriculum not found"}
+
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    c = conn.cursor()
+    c.execute("SELECT current_topic_index FROM rust_progress WHERE id = 1")
+    row = c.fetchone()
+    conn.close()
+
+    current_index = row["current_topic_index"] if row else 0
+
+    if current_index >= len(curriculum):
+        return {
+            "error": "All topics completed",
+            "current_index": current_index,
+            "total_topics": len(curriculum)
+        }
+
+    topic = curriculum[current_index]
+    return {
+        "index": topic["index"],
+        "section": topic["section"],
+        "exercise": topic["exercise"],
+        "title": topic["title"],
+        "explanation": topic["explanation"],
+        "hint": topic["hint"],
+        "current_index": current_index + 1,  # 1-indexed for display
+        "total_topics": len(curriculum)
+    }
+
+
+@mcp.tool
+def advance_rust_topic() -> Dict[str, Any]:
+    """Advance to the next Rust topic and return it.
+
+    Returns:
+        The next topic details including index, section, title, explanation, and hint.
+        Also includes progress information.
+    """
+    curriculum = load_curriculum()
+    if not curriculum:
+        return {"error": "Curriculum not found"}
+
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    c = conn.cursor()
+
+    # Get current index
+    c.execute("SELECT current_topic_index FROM rust_progress WHERE id = 1")
+    row = c.fetchone()
+    current_index = row["current_topic_index"] if row else 0
+
+    # Check if already at end
+    if current_index >= len(curriculum):
+        conn.close()
+        return {
+            "error": "All topics completed",
+            "current_index": current_index,
+            "total_topics": len(curriculum)
+        }
+
+    # Advance to next topic
+    new_index = current_index + 1
+    c.execute(
+        "UPDATE rust_progress SET current_topic_index = ?, updated_at = CURRENT_TIMESTAMP WHERE id = 1",
+        (new_index,)
+    )
+    conn.commit()
+
+    # Get the new topic
+    if new_index >= len(curriculum):
+        conn.close()
+        return {
+            "message": "Congratulations! You've completed all topics!",
+            "current_index": new_index,
+            "total_topics": len(curriculum)
+        }
+
+    topic = curriculum[new_index]
+    conn.close()
+
+    return {
+        "index": topic["index"],
+        "section": topic["section"],
+        "exercise": topic["exercise"],
+        "title": topic["title"],
+        "explanation": topic["explanation"],
+        "hint": topic["hint"],
+        "current_index": new_index + 1,  # 1-indexed for display
+        "total_topics": len(curriculum)
+    }
+
+
+@mcp.tool
+def reset_rust_progress() -> str:
+    """Reset Rust learning progress to start from topic 0.
+
+    Returns:
+        Confirmation message.
+    """
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute("UPDATE rust_progress SET current_topic_index = 0, updated_at = CURRENT_TIMESTAMP WHERE id = 1")
+    conn.commit()
+    conn.close()
+    return "Rust progress reset to topic 1. Ready to start fresh!"
 
 
 @mcp.tool

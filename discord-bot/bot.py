@@ -83,6 +83,18 @@ async def delete_all_data_tool():
 
 
 @tool
+async def get_rust_topic_tool():
+    """Get the current Rust topic the user is learning. Use this when user asks about their Rust learning progress or wants to see their current topic."""
+    return await call_mcp_tool("get_rust_topic", {})
+
+
+@tool
+async def next_rust_topic_tool():
+    """Advance to the next Rust topic and return it. Use this when user wants to learn a new Rust topic, asks to be taught Rust, or says something like 'teach me some rust' or 'next topic'."""
+    return await call_mcp_tool("advance_rust_topic", {})
+
+
+@tool
 async def get_history_today_tool():
     """Get interesting historical events that happened on this day in history."""
     return await call_mcp_tool("get_history_today", {})
@@ -178,16 +190,22 @@ tools = [
     get_last_weight_tool,
     get_weight_history_tool,
     delete_all_data_tool,
+    get_rust_topic_tool,
+    next_rust_topic_tool,
 ]
 
 prompt = ChatPromptTemplate.from_messages(
     [
         (
             "system",
-            "You are a helpful AI assistant. You can help with various tasks including weight tracking, checking the weather in London, learning about historical events that happened on this day, and other general inquiries. "
-            "When users ask about today in history, use the get_history_today_tool to get interesting facts. "
+            "You are a helpful AI assistant. You can help with various tasks including weight tracking, checking the weather in London, Rust tutoring, and sharing historical events. "
             "When showing weight history, also mention that you can generate a graph if they use the !plot command explicitly (as I cannot generate images directly yet). "
-            "Be encouraging and supportive.",
+            "When the user asks to learn Rust, be taught Rust, or says something like 'teach me some rust', use the next_rust_topic_tool to get their next topic and explain it clearly with examples. "
+            "When they ask for the next topic or want to continue learning, use next_rust_topic_tool. "
+            "When they ask about their Rust progress or what topic they're on, use get_rust_topic_tool. "
+            "When users ask about today in history, use the get_history_today_tool to get interesting facts. "
+            "Be encouraging and supportive, especially when teaching Rust concepts. "
+            "Format Rust topics nicely with the crab emoji and clear sections.",
         ),
         ("human", "{input}"),
         ("placeholder", "{agent_scratchpad}"),
@@ -323,6 +341,103 @@ async def reset(ctx):
         await ctx.send(log_msg)
 
 
+@bot.group()
+async def rust(ctx):
+    """Rust learning commands."""
+    if ctx.invoked_subcommand is None:
+        # Show current progress by default
+        data = await call_mcp_tool("get_rust_topic", {})
+        if data and "error" not in str(data):
+            # Parse the response
+            if hasattr(data, "content"):
+                try:
+                    topic_data = json.loads(
+                        data.content[0].text
+                        if isinstance(data.content, list)
+                        else data.content
+                    )
+                except:
+                    topic_data = {}
+            else:
+                topic_data = data if isinstance(data, dict) else {}
+
+            if topic_data.get("title"):
+                msg = f"🦀 You're on **Topic {topic_data.get('current_index', '?')} of {topic_data.get('total_topics', '?')}**: {topic_data.get('title')}\n"
+                msg += f"Section: {topic_data.get('section', 'unknown')}\n"
+                msg += "Say 'teach me some rust' to learn!"
+            else:
+                msg = "Use `!rust progress` to see your current topic, or `teach me some rust` to start learning!"
+        else:
+            msg = "Use `!rust progress` to see your current topic, or `teach me some rust` to start learning!"
+        logger.info(f"Sent to {ctx.channel}: {msg}")
+        await ctx.send(msg)
+
+
+@rust.command()
+async def progress(ctx):
+    """Show current Rust learning progress."""
+    data = await call_mcp_tool("get_rust_topic", {})
+    if data:
+        # Parse the response
+        if hasattr(data, "content"):
+            try:
+                topic_data = json.loads(
+                    data.content[0].text
+                    if isinstance(data.content, list)
+                    else data.content
+                )
+            except:
+                topic_data = {}
+        else:
+            topic_data = data if isinstance(data, dict) else {}
+
+        if topic_data.get("error") == "All topics completed":
+            msg = "🎉 Congratulations! You've completed all Rust topics!"
+        elif topic_data.get("title"):
+            msg = f"🦀 **Topic {topic_data.get('current_index', '?')} of {topic_data.get('total_topics', '?')}**\n"
+            msg += f"**{topic_data.get('title')}** ({topic_data.get('section', 'unknown')})\n"
+            msg += f"Exercise: `{topic_data.get('exercise', 'unknown')}`"
+        else:
+            msg = "Could not retrieve progress. Try saying 'teach me some rust'!"
+    else:
+        msg = "❌ Could not retrieve progress."
+    logger.info(f"Sent to {ctx.channel}: {msg}")
+    await ctx.send(msg)
+
+
+@rust.command()
+async def restart(ctx):
+    """Reset Rust learning progress to start over."""
+    log_msg = "⚠️ Are you sure you want to reset your Rust progress? Reply with `yes` to confirm."
+    logger.info(f"Sent to {ctx.channel}: {log_msg}")
+    await ctx.send(log_msg)
+
+    def check(m):
+        return (
+            m.author == ctx.author
+            and m.channel == ctx.channel
+            and m.content.lower() == "yes"
+        )
+
+    try:
+        await bot.wait_for("message", check=check, timeout=30.0)
+    except TimeoutError:
+        log_msg = "Reset cancelled."
+        logger.info(f"Sent to {ctx.channel}: {log_msg}")
+        await ctx.send(log_msg)
+        return
+
+    response = await call_mcp_tool("reset_rust_progress", {})
+    if response:
+        log_msg = f"🦀 {str(response)}"
+        logger.info(f"Sent to {ctx.channel}: {log_msg}")
+        await ctx.send(log_msg)
+    else:
+        log_msg = "❌ Failed to reset progress."
+        logger.info(f"Sent to {ctx.channel}: {log_msg}")
+        await ctx.send(log_msg)
+
+
 async def send_full_report(channel, data=None):
     """Send weight progress report with graph."""
     if data is None:
@@ -425,6 +540,46 @@ async def send_full_report(channel, data=None):
     await channel.send(log_msg)
 
 
+async def send_long_message(channel, content: str, max_length: int = 2000):
+    """Send a message, splitting it if it exceeds Discord's character limit."""
+    if len(content) <= max_length:
+        await channel.send(content)
+        return
+
+    # Split by newlines first, then by space if needed
+    lines = content.split('\n')
+    chunks = []
+    current_chunk = ""
+
+    for line in lines:
+        # If adding this line would exceed limit
+        if len(current_chunk) + len(line) + 1 > max_length:
+            if current_chunk:
+                chunks.append(current_chunk)
+                current_chunk = ""
+
+            # If a single line is too long, split by words
+            if len(line) > max_length:
+                words = line.split(' ')
+                for word in words:
+                    if len(current_chunk) + len(word) + 1 > max_length:
+                        if current_chunk:
+                            chunks.append(current_chunk)
+                        current_chunk = word
+                    else:
+                        current_chunk = current_chunk + " " + word if current_chunk else word
+            else:
+                current_chunk = line
+        else:
+            current_chunk = current_chunk + "\n" + line if current_chunk else line
+
+    if current_chunk:
+        chunks.append(current_chunk)
+
+    for chunk in chunks:
+        await channel.send(chunk)
+
+
 @bot.event
 async def on_message(message):
     if message.author == bot.user:
@@ -442,14 +597,12 @@ async def on_message(message):
         response = await agent_executor.ainvoke({"input": message.content})
         output = response.get("output")
         if output:
-            await message.channel.send(output)
-            logger.info(f"Sent response to {message.author}: {output}")
+            await send_long_message(message.channel, output)
     except Exception as e:
         logger.error(f"Agent error: {e}")
         await message.channel.send(
             "I'm having a bit of trouble thinking right now. Please try again."
         )
-        logger.info(f"Sent error response to {message.author}: {message.content}")
 
 
 if __name__ == "__main__":
