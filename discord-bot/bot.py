@@ -174,6 +174,24 @@ async def get_london_weather():
             return None
 
 
+# --- Persona Definition ---
+
+class Persona:
+    def __init__(self, name, description, system_instructions, tools, llm_model):
+        self.name = name
+        self.description = description
+        self.tools = tools
+        
+        self.prompt = ChatPromptTemplate.from_messages(
+            [
+                ("system", system_instructions),
+                ("human", "{input}"),
+                ("placeholder", "{agent_scratchpad}"),
+            ]
+        )
+        self.agent = create_tool_calling_agent(llm_model, tools, self.prompt)
+        self.executor = AgentExecutor(agent=self.agent, tools=tools, verbose=True)
+
 # --- Agent Setup ---
 
 llm = ChatOpenAI(
@@ -183,38 +201,97 @@ llm = ChatOpenAI(
     temperature=0,
 )
 
-tools = [
-    get_current_weather_london,
-    get_history_today_tool,
+# Define Tool Sets
+general_tools = [
+     get_current_weather_london,
+     get_history_today_tool,
+]
+
+weight_tools = [
     record_weight_tool,
     get_last_weight_tool,
     get_weight_history_tool,
     delete_all_data_tool,
-    get_rust_topic_tool,
-    next_rust_topic_tool,
 ]
 
-prompt = ChatPromptTemplate.from_messages(
-    [
-        (
-            "system",
-            "You are a helpful AI assistant. You can help with various tasks including weight tracking, checking the weather in London, Rust tutoring, and sharing historical events. "
-            "When showing weight history, also mention that you can generate a graph if they use the !plot command explicitly (as I cannot generate images directly yet). "
-            "When the user asks to learn Rust, be taught Rust, or says something like 'teach me some rust', use the next_rust_topic_tool to get their next topic and explain it clearly with examples. "
-            "When they ask for the next topic or want to continue learning, use next_rust_topic_tool. "
-            "When they ask about their Rust progress or what topic they're on, use get_rust_topic_tool. "
-            "When users ask about today in history, use the get_history_today_tool to get interesting facts. "
-            "Be encouraging and supportive, especially when teaching Rust concepts. "
-            "Format Rust topics nicely with the crab emoji and clear sections.",
+rust_tools = [
+     get_rust_topic_tool,
+     next_rust_topic_tool,
+]
+
+# Define User Modes
+user_modes = {}  # Format: {user_id: persona_name}
+
+# Create Personas
+personas = {
+    "general": Persona(
+        name="General",
+        description="A helpful assistant for general queries, weather, and history.",
+        system_instructions=(
+            "You are a helpful AI assistant. You can check the weather in London and share historical events. "
+            "When users ask about today in history, use the get_history_today_tool. "
+            "If a user asks about weight tracking or Rust, politely inform them to switch modes using `!mode weight` or `!mode rust`."
         ),
-        ("human", "{input}"),
-        ("placeholder", "{agent_scratchpad}"),
-    ]
-)
+        tools=general_tools,
+        llm_model=llm
+    ),
+    "weight": Persona(
+        name="Weight Tracker",
+        description="Focused on tracking and visualizing weight loss progress.",
+        system_instructions=(
+            "You are a dedicated Weight Tracking Assistant. Help the user log their weight and view their progress. "
+            "When showing weight history, mention they can use `!plot` for a graph. "
+            "If the user discusses unrelated topics, suggest switching to `!mode general`."
+        ),
+        tools=weight_tools,
+        llm_model=llm
+    ),
+    "rust": Persona(
+        name="Rust Tutor",
+        description="An interactive Rust programming language tutor.",
+        system_instructions=(
+            "You are a Rust Programming Tutor (Crab Mode 🦀). Your goal is to teach the user Rust. "
+            "Use `next_rust_topic_tool` when the user wants to learn or advance. "
+            "Use `get_rust_topic_tool` to check progress. "
+            "Explain concepts clearly with code examples. Be encouraging and use crab emojis! 🦀 "
+            "If the user asks about other topics, suggest `!mode general`."
+        ),
+        tools=rust_tools,
+        llm_model=llm
+    ),
+}
 
-agent = create_tool_calling_agent(llm, tools, prompt)
-agent_executor = AgentExecutor(agent=agent, tools=tools, verbose=True)
+DEFAULT_PERSONA = "general"
 
+@bot.command()
+async def mode(ctx, persona_name: str = None):
+    """Switch your interaction mode (general, weight, rust)."""
+    if not persona_name:
+        current = user_modes.get(ctx.author.id, DEFAULT_PERSONA)
+        # Handle cases where current mode might not be in personas (e.g. if we remove one)
+        if current not in personas:
+            current = DEFAULT_PERSONA
+        
+        await ctx.send(f"Current mode: **{current}**. Available modes: {', '.join(personas.keys())}.")
+        return
+
+    persona_name = persona_name.lower()
+    if persona_name in personas:
+        user_modes[ctx.author.id] = persona_name
+        
+        # Send a welcome message from the new persona
+        await ctx.send(f"Switched to **{personas[persona_name].name}** mode. {personas[persona_name].description}")
+    else:
+        await ctx.send(f"Unknown mode '{persona_name}'. Available modes: {', '.join(personas.keys())}")
+
+@bot.command()
+async def modes(ctx):
+    """List all available personas."""
+    msg = "**Available Modes:**\n"
+    for p_id, p in personas.items():
+        msg += f"• **{p_id}**: {p.description}\n"
+    msg += "\nUse `!mode <name>` to switch."
+    await ctx.send(msg)
 
 @bot.event
 async def on_ready():
@@ -592,14 +669,22 @@ async def on_message(message):
     if message.content.startswith("!"):
         return
 
-    # Use LangChain Agent for everything else
+    # Determine user's persona
+    user_persona_name = user_modes.get(message.author.id, DEFAULT_PERSONA)
+    # Check if persona exists, otherwise fallback to default
+    if user_persona_name not in personas:
+        user_persona_name = DEFAULT_PERSONA
+    
+    user_agent_executor = personas[user_persona_name].executor
+
+    # Use LangChain Agent
     try:
-        response = await agent_executor.ainvoke({"input": message.content})
+        response = await user_agent_executor.ainvoke({"input": message.content})
         output = response.get("output")
         if output:
             await send_long_message(message.channel, output)
     except Exception as e:
-        logger.error(f"Agent error: {e}")
+        logger.error(f"Agent error for persona {user_persona_name}: {e}")
         await message.channel.send(
             "I'm having a bit of trouble thinking right now. Please try again."
         )
