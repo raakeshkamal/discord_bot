@@ -1,11 +1,19 @@
+# Core dependencies
+langchain>=0.3.0
+langchain-openai>=0.2.0
+langchain-community>=0.3.0
+langchain-mcp-adapters>=0.2.0
+
+# Bot & UI
 discord.py
+gradio
 aiohttp
+
+# Data & Viz
 plotly
 kaleido
 pandas
+
+# Utils
 python-dotenv
-openai
-langchain==0.1.20
-langchain-openai==0.1.6
-langchain-community==0.0.38
 fastmcp

@@ -15,6 +15,8 @@ ENV KALEIDO_CHROMIUM_PATH=/usr/bin/chromium
 COPY requirements.txt .
 RUN pip install uv && uv pip install --system --no-cache -r requirements.txt
 
-COPY bot.py .
+COPY . .
+
+EXPOSE 7860
 
 CMD ["python", "bot.py"]

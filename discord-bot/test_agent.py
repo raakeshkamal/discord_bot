@@ -5,18 +5,13 @@ from dotenv import load_dotenv
 # Load env vars
 load_dotenv()
 
-# Mock discord things to allow importing bot
-import unittest.mock
-
-with (
-    unittest.mock.patch("discord.ext.commands.Bot"),
-    unittest.mock.patch("discord.Intents"),
-):
-    from bot import agent_executor
-
+from agent_logic import personas
 
 async def test_agent():
     print("--- Testing Agent ---")
+    
+    # Use general persona for testing
+    agent_executor = personas["general"].executor
 
     queries = [
         "What is the weather in London?",

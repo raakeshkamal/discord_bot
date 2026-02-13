@@ -11,119 +11,16 @@ import re
 import logging
 from fastmcp import Client
 
+# Import from agent_logic
+from agent_logic import personas, initialize_personas, get_london_weather, logger
+
 # Configure logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+# logging.basicConfig(level=logging.INFO) # Already configured in agent_logic if needed, but let's keep it here for bot.py specific
+logger.setLevel(logging.INFO)
 
 # Environment variables
 DISCORD_TOKEN = os.environ.get("DISCORD_TOKEN")
-OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY")
-OPENROUTER_MODEL = os.environ.get(
-    "OPENROUTER_MODEL", "google/gemini-2.0-flash-lite-preview-02-05:free"
-)
-MCP_SERVER_URL = os.environ.get("MCP_SERVER_URL", "http://mcp-server:8000/mcp")
 CHANNEL_ID = int(os.environ.get("DISCORD_CHANNEL_ID", "0"))
-
-# --- LangChain Imports ---
-try:
-    import langchain
-
-    print(f"DEBUG: langchain version: {langchain.__version__}")
-    print(f"DEBUG: langchain path: {langchain.__file__}")
-    import langchain.agents
-
-    print(f"DEBUG: langchain.agents contents: {dir(langchain.agents)}")
-except Exception as e:
-    print(f"DEBUG: Error inspecting langchain: {e}")
-
-from langchain_openai import ChatOpenAI
-from langchain.agents import create_tool_calling_agent, AgentExecutor
-from langchain_core.tools import tool
-from langchain_core.prompts import ChatPromptTemplate
-
-# --- Tool Definitions ---
-
-
-@tool
-async def get_current_weather_london():
-    """Get the current weather in London."""
-    return await get_london_weather()
-
-
-@tool
-async def record_weight_tool(weight: float, unit: str):
-    """Record the user's weight.
-
-    Args:
-        weight: The numerical weight value.
-        unit: The unit of measurement ('kg' or 'lbs').
-    """
-    return await call_mcp_tool("record_weight", {"weight": weight, "unit": unit})
-
-
-@tool
-async def get_last_weight_tool():
-    """Get the last recorded weight."""
-    return await call_mcp_tool("get_last_weight", {})
-
-
-@tool
-async def get_weight_history_tool():
-    """Get the recent weight history."""
-    return await call_mcp_tool("get_weights", {})
-
-
-@tool
-async def delete_all_data_tool():
-    """Delete all recorded weight data. Ask for confirmation before calling this."""
-    # NOTE: In a real production app, we might want the agent to NOT have this power
-    # without a specific human-in-the-loop confirmation step.
-    # For now, we will allow it but the system prompt should encourage caution.
-    return await call_mcp_tool("delete_all_weights", {})
-
-
-@tool
-async def get_rust_topic_tool():
-    """Get the current Rust topic the user is learning. Use this when user asks about their Rust learning progress or wants to see their current topic."""
-    return await call_mcp_tool("get_rust_topic", {})
-
-
-@tool
-async def next_rust_topic_tool():
-    """Advance to the next Rust topic and return it. Use this when user wants to learn a new Rust topic, asks to be taught Rust, or says something like 'teach me some rust' or 'next topic'."""
-    return await call_mcp_tool("advance_rust_topic", {})
-
-
-@tool
-async def reset_rust_progress_tool():
-    """Reset the user's Rust learning progress. Use this functionality ONLY when the user explicitly asks to start over or reset their progress."""
-    return await call_mcp_tool("reset_rust_progress", {})
-
-
-@tool
-async def get_history_today_tool():
-    """Get interesting historical events that happened on this day in history."""
-    return await call_mcp_tool("get_history_today", {})
-
-
-# Setup Intents
-intents = discord.Intents.default()
-intents.message_content = True
-bot = commands.Bot(command_prefix="!", intents=intents)
-
-
-async def call_mcp_tool(tool_name: str, arguments: dict):
-    """Call an MCP tool using FastMCP Client."""
-    logger.debug(f"Calling MCP tool: {tool_name} with args: {arguments}")
-    try:
-        async with Client(MCP_SERVER_URL) as client:
-            result = await client.call_tool(tool_name, arguments)
-            logger.debug(f"MCP tool response: {result}")
-            return result
-    except Exception as e:
-        logger.error(f"Failed to call MCP tool {tool_name}: {e}")
-        return None
-
 
 # Weather code to human-readable description mapping
 WEATHER_CODES = {
@@ -157,118 +54,13 @@ WEATHER_CODES = {
     99: "thunderstorm with heavy hail",
 }
 
+# Setup Intents
+intents = discord.Intents.default()
+intents.message_content = True
+bot = commands.Bot(command_prefix="!", intents=intents)
 
-async def get_london_weather():
-    """Fetch current weather for London from Open-Meteo API."""
-    url = "https://api.open-meteo.com/v1/forecast"
-    params = {
-        "latitude": 51.5072,
-        "longitude": -0.1276,
-        "current_weather": "true",
-    }
-    async with aiohttp.ClientSession() as session:
-        try:
-            async with session.get(url, params=params) as response:
-                if response.status != 200:
-                    text = await response.text()
-                    logger.error(f"Weather API Error: {response.status} - {text}")
-                    return None
-                data = await response.json()
-                return data.get("current_weather")
-        except Exception as e:
-            logger.error(f"Failed to fetch weather: {e}")
-            return None
-
-
-# --- Persona Definition ---
-
-class Persona:
-    def __init__(self, name, description, system_instructions, tools, llm_model):
-        self.name = name
-        self.description = description
-        self.tools = tools
-        
-        self.prompt = ChatPromptTemplate.from_messages(
-            [
-                ("system", system_instructions),
-                ("human", "{input}"),
-                ("placeholder", "{agent_scratchpad}"),
-            ]
-        )
-        self.agent = create_tool_calling_agent(llm_model, tools, self.prompt)
-        self.executor = AgentExecutor(agent=self.agent, tools=tools, verbose=True)
-
-# --- Agent Setup ---
-
-llm = ChatOpenAI(
-    api_key=OPENROUTER_API_KEY,
-    base_url="https://openrouter.ai/api/v1",
-    model=OPENROUTER_MODEL,
-    temperature=0,
-)
-
-# Define Tool Sets
-general_tools = [
-     get_current_weather_london,
-     get_history_today_tool,
-]
-
-weight_tools = [
-    record_weight_tool,
-    get_last_weight_tool,
-    get_weight_history_tool,
-    delete_all_data_tool,
-]
-
-rust_tools = [
-     get_rust_topic_tool,
-     next_rust_topic_tool,
-     reset_rust_progress_tool,
-]
-
-# Define User Modes
+# --- User Mode Management ---
 user_modes = {}  # Format: {user_id: persona_name}
-
-# Create Personas
-personas = {
-    "general": Persona(
-        name="General",
-        description="A helpful assistant for general queries, weather, and history.",
-        system_instructions=(
-            "You are a helpful AI assistant. You can check the weather in London and share historical events. "
-            "When users ask about today in history, use the get_history_today_tool. "
-            "If a user asks about weight tracking or Rust, politely inform them to switch modes using `!mode weight` or `!mode rust`."
-        ),
-        tools=general_tools,
-        llm_model=llm
-    ),
-    "weight": Persona(
-        name="Weight Tracker",
-        description="Focused on tracking and visualizing weight loss progress.",
-        system_instructions=(
-            "You are a dedicated Weight Tracking Assistant. Help the user log their weight and view their progress. "
-            "When showing weight history, mention they can use `!plot` for a graph. "
-            "If the user discusses unrelated topics, suggest switching to `!mode general`."
-        ),
-        tools=weight_tools,
-        llm_model=llm
-    ),
-    "rust": Persona(
-        name="Rust Tutor",
-        description="An interactive Rust programming language tutor.",
-        system_instructions=(
-            "You are a Rust Programming Tutor (Crab Mode 🦀). Your goal is to teach the user Rust. "
-            "Use `next_rust_topic_tool` when the user wants to learn or advance. "
-            "Use `get_rust_topic_tool` to check progress. "
-            "Use `reset_rust_progress_tool` if the user wants to start over. "
-            "Explain concepts clearly with code examples. Be encouraging and use crab emojis! 🦀 "
-            "If the user asks about other topics, suggest `!mode general`."
-        ),
-        tools=rust_tools,
-        llm_model=llm
-    ),
-}
-
 DEFAULT_PERSONA = "general"
 
 @bot.command()
@@ -301,18 +93,30 @@ async def modes(ctx):
     msg += "\nUse `!mode <name>` to switch."
     await ctx.send(msg)
 
+# Global state for startup
+has_fired_startup_check = False
+
 @bot.event
 async def on_ready():
+    global has_fired_startup_check
     logger.info(f"Logged in as {bot.user} (ID: {bot.user.id})")
-    daily_check.start()
+    
+    # Initialize personas (load MCP tools)
+    await initialize_personas()
+    
+    if not daily_check.is_running():
+        logger.info("Starting daily check-in loop...")
+        daily_check.start()
 
 
 @tasks.loop(hours=24)
 async def daily_check():
     """Send daily check-in message."""
+    logger.info(f"Executing daily_check. CHANNEL_ID: {CHANNEL_ID}")
     if CHANNEL_ID:
         channel = bot.get_channel(CHANNEL_ID)
         if channel:
+            logger.info(f"Found channel: {channel.name} (ID: {channel.id})")
             weather = await get_london_weather()
             if weather:
                 temp = weather.get("temperature", "N/A")
@@ -322,11 +126,20 @@ async def daily_check():
                 sun_emoji = "🌞" if is_day else "🌙"
                 weather_msg = f"{sun_emoji} It's {temp}°C and {condition} in London."
             else:
+                logger.warning("Failed to fetch weather data.")
                 weather_msg = "Good morning!"
 
             log_msg = f"{weather_msg} Feel free to ask me for help with anything today!"
-            logger.info(f"Sent daily check to {channel}: {log_msg}")
-            await channel.send(log_msg)
+            logger.info(f"Sending message: {log_msg}")
+            try:
+                await channel.send(log_msg)
+                logger.info(f"Successfully sent daily check to {channel}")
+            except Exception as e:
+                logger.error(f"Failed to send message to channel: {e}")
+        else:
+            logger.error(f"Could not find channel with ID: {CHANNEL_ID}. Make sure the bot has access to this channel.")
+    else:
+        logger.warning("CHANNEL_ID is not set (0). Skipping daily check-in.")
 
 
 @daily_check.before_loop
