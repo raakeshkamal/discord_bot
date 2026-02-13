@@ -17,3 +17,9 @@ pandas
 # Utils
 python-dotenv
 fastmcp
+
+# Observability (Local LangSmith alternative)
+arize-phoenix
+openinference-instrumentation-langchain
+opentelemetry-sdk
+opentelemetry-exporter-otlp

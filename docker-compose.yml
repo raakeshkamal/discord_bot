@@ -17,8 +17,10 @@ services:
       - OPENROUTER_MODEL=${OPENROUTER_MODEL:-google/gemini-2.0-flash-lite-preview-02-05:free}
       - DISCORD_CHANNEL_ID=${DISCORD_CHANNEL_ID:-0}
       - MCP_SERVER_URL=http://mcp-server:8000/mcp
+      - PHOENIX_COLLECTOR_ENDPOINT=http://phoenix:4317
     depends_on:
       - mcp-server
+      - phoenix
     restart: always
 
   web-ui:
@@ -33,7 +35,19 @@ services:
       - OPENROUTER_MODEL=${OPENROUTER_MODEL:-google/gemini-2.0-flash-lite-preview-02-05:free}
       - DISCORD_CHANNEL_ID=${DISCORD_CHANNEL_ID:-0}
       - MCP_SERVER_URL=http://mcp-server:8000/mcp
+      - PHOENIX_COLLECTOR_ENDPOINT=http://phoenix:4317
     depends_on:
       - mcp-server
+      - phoenix
+    restart: always
+
+  phoenix:
+    image: arizephoenix/phoenix:latest
+    container_name: phoenix
+    volumes:
+      - ./phoenix_data:/root/.phoenix
+    ports:
+      - "6006:6006"
+      - "4317:4317"
     restart: always
 

@@ -8,6 +8,20 @@ from langchain_core.tools import tool
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_mcp_adapters.client import MultiServerMCPClient
 
+# --- Observability Setup (Arize Phoenix) ---
+try:
+    from phoenix.otel import register
+    from openinference.instrumentation.langchain import LangChainInstrumentor
+
+    # PHOENIX_COLLECTOR_ENDPOINT is set in docker-compose.yml
+    tracer_provider = register()
+    LangChainInstrumentor().instrument(tracer_provider=tracer_provider)
+    logging.getLogger(__name__).info("Arize Phoenix instrumentation initialized.")
+except ImportError:
+    logging.getLogger(__name__).warning("Arize Phoenix libraries not found. Tracing disabled.")
+except Exception as e:
+    logging.getLogger(__name__).warning(f"Failed to initialize Arize Phoenix: {e}")
+
 # Configure logging
 logger = logging.getLogger(__name__)
 
