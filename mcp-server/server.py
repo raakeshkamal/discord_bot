@@ -1,36 +1,42 @@
 from fastmcp import FastMCP
-import sqlite3
 import os
 import json
 from datetime import datetime
 from typing import List, Dict, Any, Optional
 import requests
 from bs4 import BeautifulSoup
+from pymongo import MongoClient
+import logging
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 mcp = FastMCP("Weight Tracker MCP Server")
 
-DB_PATH = os.environ.get("DB_PATH", "data/weight.db")
+MONGO_URI = os.environ.get("MONGO_URI", "mongodb://mongodb:27017/bot_db")
 CURRICULUM_PATH = os.environ.get("CURRICULUM_PATH", "data/rust_curriculum.json")
 
-os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
+# Initialize MongoDB client
+# We use a lazy initialization or a global client
+client = MongoClient(MONGO_URI)
+db = client.get_database()
+weights_col = db["weights"]
+rust_progress_col = db["rust_progress"]
 
 
 def init_db():
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    c.execute("""CREATE TABLE IF NOT EXISTS weights
-                 (id INTEGER PRIMARY KEY AUTOINCREMENT,
-                  weight REAL NOT NULL,
-                  unit TEXT NOT NULL,
-                  timestamp DATETIME DEFAULT CURRENT_TIMESTAMP)""")
-    c.execute("""CREATE TABLE IF NOT EXISTS rust_progress
-                 (id INTEGER PRIMARY KEY CHECK (id = 1),
-                  current_topic_index INTEGER DEFAULT 0,
-                  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP)""")
-    # Initialize progress row if it doesn't exist
-    c.execute("INSERT OR IGNORE INTO rust_progress (id, current_topic_index) VALUES (1, 0)")
-    conn.commit()
-    conn.close()
+    try:
+        # Initialize rust_progress if it doesn't exist
+        if rust_progress_col.count_documents({"_id": "global_progress"}) == 0:
+            rust_progress_col.insert_one({
+                "_id": "global_progress",
+                "current_topic_index": 0,
+                "updated_at": datetime.utcnow()
+            })
+        logger.info("MongoDB collections initialized.")
+    except Exception as e:
+        logger.error(f"Failed to initialize MongoDB: {e}")
 
 
 def load_curriculum() -> List[Dict[str, Any]]:
@@ -56,13 +62,12 @@ def record_weight(weight: float, unit: str = "kg") -> str:
     Returns:
         Confirmation message with recorded weight
     """
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    c.execute("INSERT INTO weights (weight, unit) VALUES (?, ?)", (weight, unit))
-    record_id = c.lastrowid
-    conn.commit()
-    conn.close()
-
+    entry = {
+        "weight": weight,
+        "unit": unit,
+        "timestamp": datetime.utcnow()
+    }
+    weights_col.insert_one(entry)
     return f"✅ Recorded: {weight} {unit}"
 
 
@@ -71,16 +76,14 @@ def get_weights() -> List[Dict[str, Any]]:
     """Get all weight records ordered by timestamp (most recent first).
 
     Returns:
-        List of weight records with id, weight, unit, and timestamp
+        List of weight records with weight, unit, and timestamp
     """
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    c = conn.cursor()
-    c.execute("SELECT id, weight, unit, timestamp FROM weights ORDER BY timestamp DESC")
-    rows = c.fetchall()
-    conn.close()
-
-    return [dict(row) for row in rows]
+    cursor = weights_col.find({}, {"_id": 0}).sort("timestamp", -1)
+    results = list(cursor)
+    for r in results:
+        if isinstance(r.get("timestamp"), datetime):
+            r["timestamp"] = r["timestamp"].isoformat()
+    return results
 
 
 @mcp.tool
@@ -88,11 +91,13 @@ def get_last_weight() -> Dict[str, Any]:
     """Get the most recent weight record.
 
     Returns:
-        The last weight record with id, weight, unit, and timestamp
+        The last weight record with weight, unit, and timestamp
     """
-    weights = get_weights()
-    if weights:
-        return weights[0]
+    last = weights_col.find_one({}, {"_id": 0}, sort=[("timestamp", -1)])
+    if last:
+        if isinstance(last.get("timestamp"), datetime):
+            last["timestamp"] = last["timestamp"].isoformat()
+        return last
     return {"error": "No weight records found"}
 
 
@@ -103,13 +108,8 @@ def delete_all_weights() -> str:
     Returns:
         Confirmation message with number of deleted records
     """
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    c.execute("DELETE FROM weights")
-    deleted_count = c.rowcount
-    conn.commit()
-    conn.close()
-    return f"Deleted {deleted_count} records"
+    result = weights_col.delete_many({})
+    return f"Deleted {result.deleted_count} records"
 
 
 @mcp.tool
@@ -124,14 +124,8 @@ def get_rust_topic() -> Dict[str, Any]:
     if not curriculum:
         return {"error": "Curriculum not found"}
 
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    c = conn.cursor()
-    c.execute("SELECT current_topic_index FROM rust_progress WHERE id = 1")
-    row = c.fetchone()
-    conn.close()
-
-    current_index = row["current_topic_index"] if row else 0
+    progress = rust_progress_col.find_one({"_id": "global_progress"})
+    current_index = progress["current_topic_index"] if progress else 0
 
     if current_index >= len(curriculum):
         return {
@@ -165,18 +159,11 @@ def advance_rust_topic() -> Dict[str, Any]:
     if not curriculum:
         return {"error": "Curriculum not found"}
 
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    c = conn.cursor()
-
-    # Get current index
-    c.execute("SELECT current_topic_index FROM rust_progress WHERE id = 1")
-    row = c.fetchone()
-    current_index = row["current_topic_index"] if row else 0
+    progress = rust_progress_col.find_one({"_id": "global_progress"})
+    current_index = progress["current_topic_index"] if progress else 0
 
     # Check if already at end
     if current_index >= len(curriculum):
-        conn.close()
         return {
             "error": "All topics completed",
             "current_index": current_index,
@@ -185,15 +172,13 @@ def advance_rust_topic() -> Dict[str, Any]:
 
     # Advance to next topic
     new_index = current_index + 1
-    c.execute(
-        "UPDATE rust_progress SET current_topic_index = ?, updated_at = CURRENT_TIMESTAMP WHERE id = 1",
-        (new_index,)
+    rust_progress_col.update_one(
+        {"_id": "global_progress"},
+        {"$set": {"current_topic_index": new_index, "updated_at": datetime.utcnow()}}
     )
-    conn.commit()
 
     # Get the new topic
     if new_index >= len(curriculum):
-        conn.close()
         return {
             "message": "Congratulations! You've completed all topics!",
             "current_index": new_index,
@@ -201,8 +186,6 @@ def advance_rust_topic() -> Dict[str, Any]:
         }
 
     topic = curriculum[new_index]
-    conn.close()
-
     return {
         "index": topic["index"],
         "section": topic["section"],
@@ -222,21 +205,11 @@ def reset_rust_progress() -> str:
     Returns:
         Confirmation message.
     """
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    c.execute("INSERT OR REPLACE INTO rust_progress (id, current_topic_index, updated_at) VALUES (1, 0, CURRENT_TIMESTAMP)")
-    conn.commit()
-
-    # Verify reset
-    c.execute("SELECT current_topic_index FROM rust_progress WHERE id = 1")
-    row = c.fetchone()
-    if row and row[0] == 0:
-        msg = "Rust progress successfully reset to Topic 1. Ready to start fresh! (v2)"
-    else:
-        msg = f"Reset attempted but current index is {row[0] if row else 'None'}. Please check logs."
-    
-    conn.close()
-    return msg
+    rust_progress_col.update_one(
+        {"_id": "global_progress"},
+        {"$set": {"current_topic_index": 0, "updated_at": datetime.utcnow()}}
+    )
+    return "Rust progress successfully reset to Topic 1. Ready to start fresh!"
 
 
 @mcp.tool

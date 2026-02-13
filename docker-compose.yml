@@ -6,6 +6,19 @@ services:
     container_name: mcp_server
     ports:
       - "8000:8000"
+    environment:
+      - MONGO_URI=mongodb://mongodb:27017/bot_db
+    depends_on:
+      - mongodb
+    restart: always
+
+  mongodb:
+    image: mongo:latest
+    container_name: mongodb
+    ports:
+      - "27117:27017"
+    volumes:
+      - ./mongo_data:/data/db
     restart: always
 
   discord-bot:
