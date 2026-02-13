@@ -224,10 +224,19 @@ def reset_rust_progress() -> str:
     """
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
-    c.execute("UPDATE rust_progress SET current_topic_index = 0, updated_at = CURRENT_TIMESTAMP WHERE id = 1")
+    c.execute("INSERT OR REPLACE INTO rust_progress (id, current_topic_index, updated_at) VALUES (1, 0, CURRENT_TIMESTAMP)")
     conn.commit()
+
+    # Verify reset
+    c.execute("SELECT current_topic_index FROM rust_progress WHERE id = 1")
+    row = c.fetchone()
+    if row and row[0] == 0:
+        msg = "Rust progress successfully reset to Topic 1. Ready to start fresh! (v2)"
+    else:
+        msg = f"Reset attempted but current index is {row[0] if row else 'None'}. Please check logs."
+    
     conn.close()
-    return "Rust progress reset to topic 1. Ready to start fresh!"
+    return msg
 
 
 @mcp.tool
