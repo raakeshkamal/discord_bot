@@ -22,29 +22,34 @@ CURRICULUM_PATH = os.environ.get("CURRICULUM_PATH", "data/rust_curriculum.json")
 client = MongoClient(MONGO_URI)
 db = client.get_database()
 weights_col = db["weights"]
-rust_progress_col = db["rust_progress"]
+learning_progress_col = db["learning_progress"]
 
 
 def init_db():
     try:
-        # Initialize rust_progress if it doesn't exist
-        if rust_progress_col.count_documents({"_id": "global_progress"}) == 0:
-            rust_progress_col.insert_one({
-                "_id": "global_progress",
-                "current_topic_index": 0,
-                "updated_at": datetime.utcnow()
-            })
+        # Initialize learning_progress for each language if it doesn't exist
+        languages = ["rust", "cpp", "python"]
+        for lang in languages:
+            if learning_progress_col.count_documents({"_id": f"{lang}_progress"}) == 0:
+                learning_progress_col.insert_one({
+                    "_id": f"{lang}_progress",
+                    "language": lang,
+                    "current_topic_index": 0,
+                    "updated_at": datetime.utcnow()
+                })
         logger.info("MongoDB collections initialized.")
     except Exception as e:
         logger.error(f"Failed to initialize MongoDB: {e}")
 
 
-def load_curriculum() -> List[Dict[str, Any]]:
-    """Load the Rust curriculum from JSON file."""
+def load_curriculum(language: str) -> List[Dict[str, Any]]:
+    """Load the curriculum for a specific language from JSON file."""
+    path = f"data/{language}_curriculum.json"
     try:
-        with open(CURRICULUM_PATH, 'r') as f:
+        with open(path, 'r') as f:
             return json.load(f)
     except FileNotFoundError:
+        logger.error(f"Curriculum not found for {language} at {path}")
         return []
 
 
@@ -112,24 +117,19 @@ def delete_all_weights() -> str:
     return f"Deleted {result.deleted_count} records"
 
 
-@mcp.tool
-def get_rust_topic() -> Dict[str, Any]:
-    """Get the current Rust topic the user is learning.
-
-    Returns:
-        The current topic details including index, section, title, explanation, and hint.
-        Also includes progress information (current topic number and total topics).
-    """
-    curriculum = load_curriculum()
+def _get_topic(language: str) -> Dict[str, Any]:
+    """Internal helper to get the current topic for a language."""
+    curriculum = load_curriculum(language)
     if not curriculum:
-        return {"error": "Curriculum not found"}
+        return {"error": f"{language.capitalize()} curriculum not found"}
 
-    progress = rust_progress_col.find_one({"_id": "global_progress"})
+    progress = learning_progress_col.find_one({"_id": f"{language}_progress"})
     current_index = progress["current_topic_index"] if progress else 0
 
     if current_index >= len(curriculum):
         return {
             "error": "All topics completed",
+            "language": language,
             "current_index": current_index,
             "total_topics": len(curriculum)
         }
@@ -142,45 +142,39 @@ def get_rust_topic() -> Dict[str, Any]:
         "title": topic["title"],
         "explanation": topic["explanation"],
         "hint": topic["hint"],
-        "current_index": current_index + 1,  # 1-indexed for display
-        "total_topics": len(curriculum)
+        "current_index": current_index + 1,
+        "total_topics": len(curriculum),
+        "language": language
     }
 
 
-@mcp.tool
-def advance_rust_topic() -> Dict[str, Any]:
-    """Advance to the next Rust topic and return it.
-
-    Returns:
-        The next topic details including index, section, title, explanation, and hint.
-        Also includes progress information.
-    """
-    curriculum = load_curriculum()
+def _advance_topic(language: str) -> Dict[str, Any]:
+    """Internal helper to advance the topic for a language."""
+    curriculum = load_curriculum(language)
     if not curriculum:
-        return {"error": "Curriculum not found"}
+        return {"error": f"{language.capitalize()} curriculum not found"}
 
-    progress = rust_progress_col.find_one({"_id": "global_progress"})
+    progress = learning_progress_col.find_one({"_id": f"{language}_progress"})
     current_index = progress["current_topic_index"] if progress else 0
 
-    # Check if already at end
     if current_index >= len(curriculum):
         return {
             "error": "All topics completed",
+            "language": language,
             "current_index": current_index,
             "total_topics": len(curriculum)
         }
 
-    # Advance to next topic
     new_index = current_index + 1
-    rust_progress_col.update_one(
-        {"_id": "global_progress"},
+    learning_progress_col.update_one(
+        {"_id": f"{language}_progress"},
         {"$set": {"current_topic_index": new_index, "updated_at": datetime.utcnow()}}
     )
 
-    # Get the new topic
     if new_index >= len(curriculum):
         return {
-            "message": "Congratulations! You've completed all topics!",
+            "message": f"Congratulations! You've completed all {language.capitalize()} topics!",
+            "language": language,
             "current_index": new_index,
             "total_topics": len(curriculum)
         }
@@ -193,23 +187,76 @@ def advance_rust_topic() -> Dict[str, Any]:
         "title": topic["title"],
         "explanation": topic["explanation"],
         "hint": topic["hint"],
-        "current_index": new_index + 1,  # 1-indexed for display
-        "total_topics": len(curriculum)
+        "current_index": new_index + 1,
+        "total_topics": len(curriculum),
+        "language": language
     }
+
+
+def _reset_progress(language: str) -> str:
+    """Internal helper to reset progress for a language."""
+    learning_progress_col.update_one(
+        {"_id": f"{language}_progress"},
+        {"$set": {"current_topic_index": 0, "updated_at": datetime.utcnow()}}
+    )
+    return f"{language.capitalize()} progress successfully reset. Ready to start fresh!"
+
+
+# --- Rust Tools ---
+@mcp.tool
+def get_rust_topic() -> Dict[str, Any]:
+    """Get the current Rust topic the user is learning."""
+    return _get_topic("rust")
+
+
+@mcp.tool
+def advance_rust_topic() -> Dict[str, Any]:
+    """Advance to the next Rust topic and return it."""
+    return _advance_topic("rust")
 
 
 @mcp.tool
 def reset_rust_progress() -> str:
-    """Reset Rust learning progress to start from topic 0.
+    """Reset Rust learning progress."""
+    return _reset_progress("rust")
 
-    Returns:
-        Confirmation message.
-    """
-    rust_progress_col.update_one(
-        {"_id": "global_progress"},
-        {"$set": {"current_topic_index": 0, "updated_at": datetime.utcnow()}}
-    )
-    return "Rust progress successfully reset to Topic 1. Ready to start fresh!"
+
+# --- C++ Tools ---
+@mcp.tool
+def get_cpp_topic() -> Dict[str, Any]:
+    """Get the current C++ topic the user is learning."""
+    return _get_topic("cpp")
+
+
+@mcp.tool
+def advance_cpp_topic() -> Dict[str, Any]:
+    """Advance to the next C++ topic and return it."""
+    return _advance_topic("cpp")
+
+
+@mcp.tool
+def reset_cpp_progress() -> str:
+    """Reset C++ learning progress."""
+    return _reset_progress("cpp")
+
+
+# --- Python Tools ---
+@mcp.tool
+def get_python_topic() -> Dict[str, Any]:
+    """Get the current Python topic the user is learning."""
+    return _get_topic("python")
+
+
+@mcp.tool
+def advance_python_topic() -> Dict[str, Any]:
+    """Advance to the next Python topic and return it."""
+    return _advance_topic("python")
+
+
+@mcp.tool
+def reset_python_progress() -> str:
+    """Reset Python learning progress."""
+    return _reset_progress("python")
 
 
 @mcp.tool

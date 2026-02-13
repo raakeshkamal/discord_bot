@@ -36,7 +36,7 @@ with gr.Blocks(title="Discord Bot Test Interface") as demo:
     
     with gr.Row():
         persona_selector = gr.Dropdown(
-            choices=["general", "weight", "rust"],
+            choices=["general", "weight", "rust", "cpp", "python"],
             value="general",
             label="Select Persona",
             interactive=True
@@ -49,6 +49,8 @@ with gr.Blocks(title="Discord Bot Test Interface") as demo:
             ["What is the weather in London?", "general"],
             ["I weigh 75 kg", "weight"],
             ["Tell me about Rust", "rust"],
+            ["Teach me some C++", "cpp"],
+            ["How do I use lists in Python?", "python"],
             ["What happened today in history?", "general"]
         ],
         cache_examples=False,

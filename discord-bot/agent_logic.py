@@ -129,12 +129,16 @@ async def initialize_personas():
     # Filter tools for specific personas
     weight_mcp = [t for t in mcp_tools if any(word in t.name for word in ["weight", "data"])]
     rust_mcp = [t for t in mcp_tools if "rust" in t.name]
+    cpp_mcp = [t for t in mcp_tools if "cpp" in t.name]
+    python_mcp = [t for t in mcp_tools if "python" in t.name]
     history_mcp = [t for t in mcp_tools if "history" in t.name]
 
     # Define Tool Sets
     general_tools = [get_current_weather_london] + history_mcp
     weight_tools = weight_mcp
     rust_tools = rust_mcp
+    cpp_tools = cpp_mcp
+    python_tools = python_mcp
 
     # Create Personas
     personas["general"] = Persona(
@@ -142,7 +146,7 @@ async def initialize_personas():
         description="A helpful assistant for general queries, weather, and history.",
         system_instructions=(
             "You are a helpful AI assistant. You can check the weather in London and share historical events. "
-            "If a user asks about weight tracking or Rust, politely inform them to switch modes."
+            "If a user asks about weight tracking or programming tutorials, politely inform them to switch modes."
         ),
         tools=general_tools,
         llm_model=llm
@@ -168,6 +172,30 @@ async def initialize_personas():
             "If the user asks about other topics, suggest switching to general mode."
         ),
         tools=rust_tools,
+        llm_model=llm
+    )
+
+    personas["cpp"] = Persona(
+        name="C++ Tutor",
+        description="An interactive C++ programming language tutor.",
+        system_instructions=(
+            "You are a C++ Programming Tutor. Your goal is to teach the user C++. "
+            "Explain concepts clearly with modern C++ examples (C++11 and later). Be precise and helpful. "
+            "If the user asks about other topics, suggest switching to general mode."
+        ),
+        tools=cpp_tools,
+        llm_model=llm
+    )
+
+    personas["python"] = Persona(
+        name="Python Tutor",
+        description="An interactive Python programming language tutor.",
+        system_instructions=(
+            "You are a Python Programming Tutor. Your goal is to teach the user Python. "
+            "Explain concepts clearly with idiomatic Python (Pythonic) examples. Be friendly and helpful. "
+            "If the user asks about other topics, suggest switching to general mode."
+        ),
+        tools=python_tools,
         llm_model=llm
     )
     

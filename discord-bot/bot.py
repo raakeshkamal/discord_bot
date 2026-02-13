@@ -17,7 +17,7 @@ from agent_logic import personas, initialize_personas, get_london_weather, logge
 # Configure logging
 # logging.basicConfig(level=logging.INFO) # Already configured in agent_logic if needed, but let's keep it here for bot.py specific
 logger.setLevel(logging.INFO)
-
+    
 # Environment variables
 DISCORD_TOKEN = os.environ.get("DISCORD_TOKEN")
 CHANNEL_ID = int(os.environ.get("DISCORD_CHANNEL_ID", "0"))
