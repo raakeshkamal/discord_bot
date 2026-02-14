@@ -260,78 +260,132 @@ def reset_python_progress() -> str:
 
 
 @mcp.tool
-def get_history_today() -> str:
-    """Get interesting historical events that happened on this day in history.
-
-    Scrapes Wikipedia's "On this day" page to find events, births, and deaths.
-
-    Returns:
-        A formatted summary of historical events for today with emojis
-    """
-    url = "https://en.wikipedia.org/wiki/Wikipedia:On_this_day/Today"
+def get_history_britannica() -> str:
+    """Get raw historical events from Britannica for today. Use this alongside Wikipedia for a comprehensive view."""
+    now = datetime.now()
+    month_name = now.strftime("%B")
+    day = now.day
+    url = f"https://www.britannica.com/on-this-day/{month_name}-{day}"
 
     try:
-        # Add User-Agent header to avoid being blocked
         headers = {
-            "User-Agent": "DiscordBot/1.0 (https://github.com/discord/discordpy; version 1.0)"
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
         }
-
         response = requests.get(url, timeout=10, headers=headers)
         response.raise_for_status()
-
         soup = BeautifulSoup(response.text, "html.parser")
-        facts = []
 
-        # Find the main content area
+        facts = ["--- BRITANNICA EVENTS ---"]
+        
+        featured = soup.find("div", class_="otd-featured-event")
+        if featured:
+            year = featured.find("div", class_="date-label")
+            title = featured.find("div", class_="title")
+            if year and title:
+                facts.append(f"Featured: {year.get_text().strip()}: {title.get_text().strip()}")
+
+        events = soup.find_all("div", class_="md-history-event", limit=5)
+        for event in events:
+            year = event.find("div", class_="date-label")
+            body = event.find("div", class_="card-body")
+            if year and body:
+                text = body.get_text(separator=" ").strip()
+                if "Read today's edition" in text:
+                    text = text.split("Read today's edition")[0].strip()
+                text = " ".join(text.split())
+                facts.append(f"{year.get_text().strip()}: {text}")
+
+        born_section = soup.find_all("div", class_="md-history-born", limit=5)
+        for born in born_section:
+            year = born.find("div", class_="date-label")
+            name = born.find("a", class_="font-weight-bold")
+            desc = born.find("div", class_="identifier")
+            if year and name:
+                info = f"Birth: {year.get_text().strip()} - {name.get_text().strip()}"
+                if desc:
+                    info += f" ({desc.get_text().strip()})"
+                facts.append(info)
+
+        return "\n".join(facts) if len(facts) > 1 else "No Britannica facts found."
+    except Exception as e:
+        logger.error(f"Britannica error: {e}")
+        return f"Error fetching Britannica: {e}"
+
+
+@mcp.tool
+def get_history_today() -> str:
+    """Get raw historical events from Wikipedia for today. Use this alongside Britannica for a comprehensive view."""
+    url = "https://en.wikipedia.org/wiki/Wikipedia:On_this_day/Today"
+    
+    try:
+        headers = {"User-Agent": "DiscordBot/1.0"}
+        response = requests.get(url, timeout=10, headers=headers)
+        response.raise_for_status()
+        soup = BeautifulSoup(response.text, "html.parser")
+        facts = ["--- WIKIPEDIA EVENTS ---"]
+        
         content = soup.find("div", class_="mw-parser-output")
         if not content:
-            return "facing difficulties"
+            return "No Wikipedia facts found."
 
-        # Get first <ul> for events (5 items)
+        # Get the first <ul> for main events
         events_ul = None
         for ul in content.find_all("ul", recursive=False):
             if ul.find("li"):
-                # Make sure this is the events list (not the navigation links)
-                first_li = ul.find("li")
-                if first_li:
-                    events_ul = ul
-                    break
-
+                events_ul = ul
+                break
+        
         if events_ul:
-            for item in events_ul.find_all("li", limit=5):
-                text = item.get_text().strip()
-                facts.append(f"📅 {text}")
+            for item in events_ul.find_all("li", limit=8):
+                facts.append(item.get_text().strip())
 
-        # Find hlist div for births/deaths
+        # Extract births/deaths from hlist sections
         hlist_divs = content.find_all("div", class_="hlist")
-
-        # Extract births and deaths (2 each)
-        births = []
-        deaths = []
-
         for hlist_div in hlist_divs:
-            for li in hlist_div.find_all("li"):
+            for li in hlist_div.find_all("li", limit=5):
                 text = li.get_text().strip()
                 if "b." in text or "born" in text.lower():
-                    if len(births) < 2:
-                        births.append(text)
+                    facts.append(f"Birth: {text}")
                 elif "d." in text or "died" in text.lower():
-                    if len(deaths) < 2:
-                        deaths.append(text)
+                    facts.append(f"Death: {text}")
 
-        # Add to facts
-        for birth in births:
-            facts.append(f"👶 {birth}")
-        for death in deaths:
-            facts.append(f"🕯️ {death}")
-
-        if facts:
-            return "\n".join(facts)
-        else:
-            return "facing difficulties"
-
+        return "\n".join(facts) if len(facts) > 1 else "No Wikipedia facts found."
     except Exception as e:
-        return "facing difficulties"
+        logger.error(f"Wikipedia error: {e}")
+        return f"Error fetching Wikipedia: {e}"
+
+
+@mcp.tool
+def get_history_on_this_day() -> str:
+    """Get raw historical events from onthisday.com for today. Use this alongside other tools for a comprehensive view."""
+    url = "https://www.onthisday.com/"
+    
+    try:
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+        }
+        response = requests.get(url, timeout=10, headers=headers)
+        response.raise_for_status()
+        soup = BeautifulSoup(response.text, "html.parser")
+        facts = ["--- ONTHISDAY.COM EVENTS ---"]
+        
+        # Events
+        event_list = soup.find("ul", class_="event-list")
+        if event_list:
+            for li in event_list.find_all("li", class_="event", limit=8):
+                facts.append(li.get_text().strip())
+        
+        # Birthdays
+        # Usually in a photo-list or similar on the home page
+        birthdays = soup.find("ul", class_="photo-list")
+        if birthdays:
+            for li in birthdays.find_all("li", limit=5):
+                facts.append(f"Birth: {li.get_text().strip()}")
+
+        return "\n".join(facts) if len(facts) > 1 else "No OnThisDay facts found."
+    except Exception as e:
+        logger.error(f"OnThisDay error: {e}")
+        return f"Error fetching OnThisDay: {e}"
 
 
 if __name__ == "__main__":

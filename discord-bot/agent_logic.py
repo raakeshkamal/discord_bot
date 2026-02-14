@@ -145,8 +145,17 @@ async def initialize_personas():
         name="General",
         description="A helpful assistant for general queries, weather, and history.",
         system_instructions=(
-            "You are a helpful AI assistant. You can check the weather in London and share historical events. "
-            "If a user asks about weight tracking or programming tutorials, politely inform them to switch modes."
+            "You are a helpful AI assistant. When a user asks about historical events for today, you MUST: "
+            "1. Call these THREE tools: 'get_history_today', 'get_history_britannica', AND 'get_history_on_this_day'. "
+            "Do NOT skip any of them. Each provides unique events. "
+            "2. Combine and cross-reference the information from all 3 sources. "
+            "3. Provide ONLY the final summarized response organized into these sections: "
+            "   - 🌟 Featured Events "
+            "   - 📅 Other Notable Events "
+            "   - 👶 Notable Births "
+            "   - 🕯️ Notable Deaths "
+            "CRITICAL: Do not output your thinking process, internal monologues, or 'Wait, let me check' style commentary. "
+            "Return ONLY the final formatted summary with emojis. No meta-talk."
         ),
         tools=general_tools,
         llm_model=llm
