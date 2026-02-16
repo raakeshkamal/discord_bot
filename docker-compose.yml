@@ -21,14 +21,14 @@ services:
       - ./mongo_data:/data/db
     restart: always
 
-  discord-bot:
+  telegram-bot:
     build: ./discord-bot
-    container_name: discord_bot
+    container_name: telegram_bot
     environment:
-      - DISCORD_TOKEN=${DISCORD_TOKEN:-}
+      - TELEGRAM_TOKEN=${TELEGRAM_TOKEN:-}
       - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
       - OPENROUTER_MODEL=${OPENROUTER_MODEL:-google/gemini-2.0-flash-lite-preview-02-05:free}
-      - DISCORD_CHANNEL_ID=${DISCORD_CHANNEL_ID:-0}
+      - TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID:-}
       - MCP_SERVER_URL=http://mcp-server:8000/mcp
       - PHOENIX_COLLECTOR_ENDPOINT=http://phoenix:4317
     depends_on:
@@ -43,10 +43,10 @@ services:
     ports:
       - "7860:7860"
     environment:
-      - DISCORD_TOKEN=${DISCORD_TOKEN:-}
+      - TELEGRAM_TOKEN=${TELEGRAM_TOKEN:-}
       - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
       - OPENROUTER_MODEL=${OPENROUTER_MODEL:-google/gemini-2.0-flash-lite-preview-02-05:free}
-      - DISCORD_CHANNEL_ID=${DISCORD_CHANNEL_ID:-0}
+      - TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID:-}
       - MCP_SERVER_URL=http://mcp-server:8000/mcp
       - PHOENIX_COLLECTOR_ENDPOINT=http://phoenix:4317
     depends_on:

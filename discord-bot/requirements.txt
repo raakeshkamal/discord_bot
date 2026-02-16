@@ -5,9 +5,11 @@ langchain-community>=0.3.0
 langchain-mcp-adapters>=0.2.0
 
 # Bot & UI
-discord.py
+python-telegram-bot[job-queue]
+nest_asyncio
 gradio
 aiohttp
+telegramify-markdown
 
 # Data & Viz
 plotly
