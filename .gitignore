@@ -209,3 +209,5 @@ __marimo__/
 # Docker Data & Observability
 mongo_data/
 phoenix_data/
+
+output/

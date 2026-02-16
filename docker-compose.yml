@@ -21,37 +21,31 @@ services:
       - ./mongo_data:/data/db
     restart: always
 
-  telegram-bot:
-    build: ./discord-bot
-    container_name: telegram_bot
-    environment:
-      - TELEGRAM_TOKEN=${TELEGRAM_TOKEN:-}
-      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
-      - OPENROUTER_MODEL=${OPENROUTER_MODEL:-google/gemini-2.0-flash-lite-preview-02-05:free}
-      - TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID:-}
-      - MCP_SERVER_URL=http://mcp-server:8000/mcp
-      - PHOENIX_COLLECTOR_ENDPOINT=http://phoenix:4317
+  nanobot:
+    build:
+      context: .
+      dockerfile: discord-bot/Dockerfile
+    container_name: nanobot
+    env_file:
+      - .env
+    ports:
+      - "18790:18790"
     depends_on:
       - mcp-server
-      - phoenix
     restart: always
 
   web-ui:
-    build: ./discord-bot
+    build:
+      context: .
+      dockerfile: discord-bot/Dockerfile
     container_name: web_ui
     command: python gradio_ui.py
     ports:
       - "7860:7860"
-    environment:
-      - TELEGRAM_TOKEN=${TELEGRAM_TOKEN:-}
-      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
-      - OPENROUTER_MODEL=${OPENROUTER_MODEL:-google/gemini-2.0-flash-lite-preview-02-05:free}
-      - TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID:-}
-      - MCP_SERVER_URL=http://mcp-server:8000/mcp
-      - PHOENIX_COLLECTOR_ENDPOINT=http://phoenix:4317
+    env_file:
+      - .env
     depends_on:
       - mcp-server
-      - phoenix
     restart: always
 
   phoenix:
@@ -63,4 +57,3 @@ services:
       - "6006:6006"
       - "4317:4317"
     restart: always
-

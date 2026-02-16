@@ -31,12 +31,14 @@ def init_db():
         languages = ["rust", "cpp", "python"]
         for lang in languages:
             if learning_progress_col.count_documents({"_id": f"{lang}_progress"}) == 0:
-                learning_progress_col.insert_one({
-                    "_id": f"{lang}_progress",
-                    "language": lang,
-                    "current_topic_index": 0,
-                    "updated_at": datetime.utcnow()
-                })
+                learning_progress_col.insert_one(
+                    {
+                        "_id": f"{lang}_progress",
+                        "language": lang,
+                        "current_topic_index": 0,
+                        "updated_at": datetime.utcnow(),
+                    }
+                )
         logger.info("MongoDB collections initialized.")
     except Exception as e:
         logger.error(f"Failed to initialize MongoDB: {e}")
@@ -46,7 +48,7 @@ def load_curriculum(language: str) -> List[Dict[str, Any]]:
     """Load the curriculum for a specific language from JSON file."""
     path = f"data/{language}_curriculum.json"
     try:
-        with open(path, 'r') as f:
+        with open(path, "r") as f:
             return json.load(f)
     except FileNotFoundError:
         logger.error(f"Curriculum not found for {language} at {path}")
@@ -67,11 +69,7 @@ def record_weight(weight: float, unit: str = "kg") -> str:
     Returns:
         Confirmation message with recorded weight
     """
-    entry = {
-        "weight": weight,
-        "unit": unit,
-        "timestamp": datetime.utcnow()
-    }
+    entry = {"weight": weight, "unit": unit, "timestamp": datetime.utcnow()}
     weights_col.insert_one(entry)
     return f"✅ Recorded: {weight} {unit}"
 
@@ -131,7 +129,7 @@ def _get_topic(language: str) -> Dict[str, Any]:
             "error": "All topics completed",
             "language": language,
             "current_index": current_index,
-            "total_topics": len(curriculum)
+            "total_topics": len(curriculum),
         }
 
     topic = curriculum[current_index]
@@ -144,7 +142,7 @@ def _get_topic(language: str) -> Dict[str, Any]:
         "hint": topic["hint"],
         "current_index": current_index + 1,
         "total_topics": len(curriculum),
-        "language": language
+        "language": language,
     }
 
 
@@ -162,13 +160,13 @@ def _advance_topic(language: str) -> Dict[str, Any]:
             "error": "All topics completed",
             "language": language,
             "current_index": current_index,
-            "total_topics": len(curriculum)
+            "total_topics": len(curriculum),
         }
 
     new_index = current_index + 1
     learning_progress_col.update_one(
         {"_id": f"{language}_progress"},
-        {"$set": {"current_topic_index": new_index, "updated_at": datetime.utcnow()}}
+        {"$set": {"current_topic_index": new_index, "updated_at": datetime.utcnow()}},
     )
 
     if new_index >= len(curriculum):
@@ -176,7 +174,7 @@ def _advance_topic(language: str) -> Dict[str, Any]:
             "message": f"Congratulations! You've completed all {language.capitalize()} topics!",
             "language": language,
             "current_index": new_index,
-            "total_topics": len(curriculum)
+            "total_topics": len(curriculum),
         }
 
     topic = curriculum[new_index]
@@ -189,7 +187,7 @@ def _advance_topic(language: str) -> Dict[str, Any]:
         "hint": topic["hint"],
         "current_index": new_index + 1,
         "total_topics": len(curriculum),
-        "language": language
+        "language": language,
     }
 
 
@@ -197,7 +195,7 @@ def _reset_progress(language: str) -> str:
     """Internal helper to reset progress for a language."""
     learning_progress_col.update_one(
         {"_id": f"{language}_progress"},
-        {"$set": {"current_topic_index": 0, "updated_at": datetime.utcnow()}}
+        {"$set": {"current_topic_index": 0, "updated_at": datetime.utcnow()}},
     )
     return f"{language.capitalize()} progress successfully reset. Ready to start fresh!"
 
@@ -276,13 +274,15 @@ def get_history_britannica() -> str:
         soup = BeautifulSoup(response.text, "html.parser")
 
         facts = ["--- BRITANNICA EVENTS ---"]
-        
+
         featured = soup.find("div", class_="otd-featured-event")
         if featured:
             year = featured.find("div", class_="date-label")
             title = featured.find("div", class_="title")
             if year and title:
-                facts.append(f"Featured: {year.get_text().strip()}: {title.get_text().strip()}")
+                facts.append(
+                    f"Featured: {year.get_text().strip()}: {title.get_text().strip()}"
+                )
 
         events = soup.find_all("div", class_="md-history-event", limit=5)
         for event in events:
@@ -316,14 +316,14 @@ def get_history_britannica() -> str:
 def get_history_today() -> str:
     """Get raw historical events from Wikipedia for today. Use this alongside Britannica for a comprehensive view."""
     url = "https://en.wikipedia.org/wiki/Wikipedia:On_this_day/Today"
-    
+
     try:
         headers = {"User-Agent": "DiscordBot/1.0"}
         response = requests.get(url, timeout=10, headers=headers)
         response.raise_for_status()
         soup = BeautifulSoup(response.text, "html.parser")
         facts = ["--- WIKIPEDIA EVENTS ---"]
-        
+
         content = soup.find("div", class_="mw-parser-output")
         if not content:
             return "No Wikipedia facts found."
@@ -334,7 +334,7 @@ def get_history_today() -> str:
             if ul.find("li"):
                 events_ul = ul
                 break
-        
+
         if events_ul:
             for item in events_ul.find_all("li", limit=8):
                 facts.append(item.get_text().strip())
@@ -359,7 +359,7 @@ def get_history_today() -> str:
 def get_history_on_this_day() -> str:
     """Get raw historical events from onthisday.com for today. Use this alongside other tools for a comprehensive view."""
     url = "https://www.onthisday.com/"
-    
+
     try:
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
@@ -368,13 +368,13 @@ def get_history_on_this_day() -> str:
         response.raise_for_status()
         soup = BeautifulSoup(response.text, "html.parser")
         facts = ["--- ONTHISDAY.COM EVENTS ---"]
-        
+
         # Events
         event_list = soup.find("ul", class_="event-list")
         if event_list:
             for li in event_list.find_all("li", class_="event", limit=8):
                 facts.append(li.get_text().strip())
-        
+
         # Birthdays
         # Usually in a photo-list or similar on the home page
         birthdays = soup.find("ul", class_="photo-list")
@@ -388,5 +388,73 @@ def get_history_on_this_day() -> str:
         return f"Error fetching OnThisDay: {e}"
 
 
+@mcp.tool
+def get_current_weather_london() -> Dict[str, Any]:
+    """Get the current weather in London.
+
+    Returns:
+        Dictionary containing temperature, weather condition, and other weather data
+    """
+    url = "https://api.open-meteo.com/v1/forecast"
+    params = {
+        "latitude": 51.5072,
+        "longitude": -0.1276,
+        "current_weather": "true",
+    }
+
+    try:
+        response = requests.get(url, params=params, timeout=10)
+        response.raise_for_status()
+        data = response.json()
+        current = data.get("current_weather", {})
+
+        # Weather code mapping
+        weather_codes = {
+            0: "clear sky",
+            1: "mainly clear",
+            2: "partly cloudy",
+            3: "overcast",
+            45: "foggy",
+            48: "depositing rime fog",
+            51: "light drizzle",
+            53: "moderate drizzle",
+            55: "dense drizzle",
+            56: "light freezing drizzle",
+            57: "dense freezing drizzle",
+            61: "slight rain",
+            63: "moderate rain",
+            65: "heavy rain",
+            66: "light freezing rain",
+            67: "heavy freezing rain",
+            71: "slight snow",
+            73: "moderate snow",
+            75: "heavy snow",
+            77: "snow grains",
+            80: "slight rain showers",
+            81: "moderate rain showers",
+            82: "violent rain showers",
+            85: "slight snow showers",
+            86: "heavy snow showers",
+            95: "thunderstorm",
+            96: "thunderstorm with slight hail",
+            99: "thunderstorm with heavy hail",
+        }
+
+        code = current.get("weathercode", 0)
+        is_day = current.get("is_day", 1)
+
+        return {
+            "temperature": current.get("temperature"),
+            "weathercode": code,
+            "condition": weather_codes.get(code, "unknown conditions"),
+            "is_day": is_day,
+            "windspeed": current.get("windspeed"),
+            "winddirection": current.get("winddirection"),
+        }
+    except Exception as e:
+        logger.error(f"Weather error: {e}")
+        return {"error": f"Failed to fetch weather: {str(e)}"}
+
+
 if __name__ == "__main__":
-    mcp.run(transport="http", host="0.0.0.0", port=8000)
+    mcp.run(transport="sse", host="0.0.0.0", port=8000)

@@ -21,7 +21,16 @@ import plotly.graph_objects as go
 import plotly.io as pio
 import pandas as pd
 
-from agent_logic import personas, initialize_personas, get_london_weather, logger
+from agent_logic import (
+    initialize_personas,
+    get_london_weather,
+    process_message,
+    set_user_mode,
+    get_user_mode,
+    get_available_modes,
+    get_mode_description,
+    logger,
+)
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -60,16 +69,9 @@ WEATHER_CODES = {
     99: "thunderstorm with heavy hail",
 }
 
-user_modes = {}
-DEFAULT_PERSONA = "general"
-
+# Conversation states
 CONFIRM_RESET = range(1)
 CONFIRM_RUST_RESTART = range(1)
-
-
-async def call_mcp_tool(tool_name: str, args: dict = None):
-    """Call MCP tool via the persona's executor."""
-    return None
 
 
 async def initialize():
@@ -80,7 +82,7 @@ async def initialize():
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Welcome message."""
     await update.message.reply_text(
-        "Welcome! I'm your Telegram bot assistant.\n\n"
+        "Welcome! I'm your Telegram bot assistant powered by nanobot AI.\n\n"
         "Use /modes to see available personas.\n"
         "Use /mode <name> to switch modes.\n"
         "Or just chat with me!"
@@ -89,46 +91,38 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def mode_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Switch your interaction mode (general, weight, rust, cpp, python)."""
-    user_id = update.effective_user.id
+    user_id = str(update.effective_user.id)
 
     if not context.args:
-        current = user_modes.get(user_id, DEFAULT_PERSONA)
-        if current not in personas:
-            current = DEFAULT_PERSONA
+        current = get_user_mode(user_id)
+        available = get_available_modes()
         await update.message.reply_text(
-            f"Current mode: {current}. Available modes: {', '.join(personas.keys())}."
+            f"Current mode: {current}. Available modes: {', '.join(available)}."
         )
         return
 
     persona_name = context.args[0].lower()
-    if persona_name in personas:
-        user_modes[user_id] = persona_name
-        await update.message.reply_text(
-            f"Switched to {personas[persona_name].name} mode. {personas[persona_name].description}"
-        )
-    else:
-        await update.message.reply_text(
-            f"Unknown mode '{persona_name}'. Available modes: {', '.join(personas.keys())}"
-        )
-        return
+    available_modes = get_available_modes()
 
-    persona_name = context.args[0].lower()
-    if persona_name in personas:
-        user_modes[user_id] = persona_name
+    if persona_name in available_modes:
+        set_user_mode(user_id, persona_name)
+        description = get_mode_description(persona_name)
         await update.message.reply_text(
-            f"Switched to {personas[persona_name].name} mode. {personas[persona_name].description}"
+            f"Switched to {persona_name.capitalize()} mode. {description}"
         )
     else:
         await update.message.reply_text(
-            f"Unknown mode '{persona_name}'. Available modes: {', '.join(personas.keys())}"
+            f"Unknown mode '{persona_name}'. Available modes: {', '.join(available_modes)}"
         )
 
 
 async def modes_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """List all available personas."""
+    available_modes = get_available_modes()
     msg = "Available Modes:\n"
-    for p_id, p in personas.items():
-        msg += f"• {p_id}: {p.description}\n"
+    for mode in available_modes:
+        description = get_mode_description(mode)
+        msg += f"• {mode}: {description}\n"
     msg += "\nUse /mode <name> to switch."
     await update.message.reply_text(msg)
 
@@ -148,21 +142,19 @@ async def weight_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Please provide a valid number.")
         return
 
-    user_id = update.effective_user.id
-    user_persona = user_modes.get(user_id, DEFAULT_PERSONA)
+    user_id = str(update.effective_user.id)
+    chat_id = str(update.effective_chat.id)
 
-    if user_persona not in personas:
-        user_persona = DEFAULT_PERSONA
+    # Ensure user is in weight mode
+    set_user_mode(user_id, "weight")
 
     try:
-        executor = personas[user_persona].executor
-        response = await executor.ainvoke(
-            {"input": f"Record my weight: {value} {unit}"}
+        response = await process_message(
+            user_id, f"Record my weight: {value} {unit}", chat_id
         )
-        output = response.get("output", "")
         await update.message.reply_text(
-            telegramify_markdown.markdownify(output)
-            if output
+            telegramify_markdown.markdownify(response)
+            if response
             else f"✅ Recorded: {value} {unit}",
             parse_mode=ParseMode.MARKDOWN_V2,
         )
@@ -173,20 +165,15 @@ async def weight_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def last_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Show the last recorded weight."""
-    user_id = update.effective_user.id
-    user_persona = user_modes.get(user_id, DEFAULT_PERSONA)
-
-    if user_persona not in personas:
-        user_persona = DEFAULT_PERSONA
+    user_id = str(update.effective_user.id)
+    chat_id = str(update.effective_chat.id)
 
     try:
-        executor = personas[user_persona].executor
-        response = await executor.ainvoke(
-            {"input": "What was my last recorded weight?"}
+        response = await process_message(
+            user_id, "What was my last recorded weight?", chat_id
         )
-        output = response.get("output", "No weight records found.")
         await update.message.reply_text(
-            telegramify_markdown.markdownify(output), parse_mode=ParseMode.MARKDOWN_V2
+            telegramify_markdown.markdownify(response), parse_mode=ParseMode.MARKDOWN_V2
         )
     except Exception as e:
         logger.error(f"Last weight error: {e}")
@@ -195,20 +182,17 @@ async def last_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def plot_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Show last 10 readings and progress graph."""
-    user_id = update.effective_user.id
-    user_persona = user_modes.get(user_id, DEFAULT_PERSONA)
-
-    if user_persona not in personas:
-        user_persona = DEFAULT_PERSONA
+    user_id = str(update.effective_user.id)
+    chat_id = str(update.effective_chat.id)
 
     try:
-        executor = personas[user_persona].executor
-        response = await executor.ainvoke({"input": "Show my weight progress chart"})
-        output = response.get("output", "")
+        response = await process_message(
+            user_id, "Show my weight progress chart", chat_id
+        )
 
         await update.message.reply_text(
-            telegramify_markdown.markdownify(output)
-            if output
+            telegramify_markdown.markdownify(response)
+            if response
             else "Generating chart...",
             parse_mode=ParseMode.MARKDOWN_V2,
         )
@@ -228,18 +212,15 @@ async def reset_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def reset_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle confirmation for reset."""
     if update.message.text.lower() == "yes":
-        user_id = update.effective_user.id
-        user_persona = user_modes.get(user_id, DEFAULT_PERSONA)
-
-        if user_persona not in personas:
-            user_persona = DEFAULT_PERSONA
+        user_id = str(update.effective_user.id)
+        chat_id = str(update.effective_chat.id)
 
         try:
-            executor = personas[user_persona].executor
-            response = await executor.ainvoke({"input": "Delete all my weight records"})
-            output = response.get("output", "✅ All records deleted\\.")
+            response = await process_message(
+                user_id, "Delete all my weight records", chat_id
+            )
             await update.message.reply_text(
-                telegramify_markdown.markdownify(output),
+                telegramify_markdown.markdownify(response),
                 parse_mode=ParseMode.MARKDOWN_V2,
             )
         except Exception as e:
@@ -259,18 +240,17 @@ async def cancel_conversation(update: Update, context: ContextTypes.DEFAULT_TYPE
 
 async def rust_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Rust learning commands."""
-    user_id = update.effective_user.id
-    user_persona = user_modes.get(user_id, DEFAULT_PERSONA)
-
-    if user_persona not in personas:
-        user_persona = DEFAULT_PERSONA
+    user_id = str(update.effective_user.id)
+    chat_id = str(update.effective_chat.id)
 
     try:
-        executor = personas[user_persona].executor
-        response = await executor.ainvoke({"input": "Show me my current Rust topic"})
-        output = response.get("output", "Use /rust_progress to see your current topic!")
+        # Ensure user is in rust mode
+        set_user_mode(user_id, "rust")
+        response = await process_message(
+            user_id, "Show me my current Rust topic", chat_id
+        )
         await update.message.reply_text(
-            telegramify_markdown.markdownify(output), parse_mode=ParseMode.MARKDOWN_V2
+            telegramify_markdown.markdownify(response), parse_mode=ParseMode.MARKDOWN_V2
         )
     except Exception as e:
         logger.error(f"Rust error: {e}")
@@ -279,20 +259,17 @@ async def rust_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def rust_progress_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Show current Rust learning progress."""
-    user_id = update.effective_user.id
-    user_persona = user_modes.get(user_id, DEFAULT_PERSONA)
-
-    if user_persona not in personas:
-        user_persona = DEFAULT_PERSONA
+    user_id = str(update.effective_user.id)
+    chat_id = str(update.effective_chat.id)
 
     try:
-        executor = personas[user_persona].executor
-        response = await executor.ainvoke(
-            {"input": "What is my current Rust topic and progress?"}
+        # Ensure user is in rust mode
+        set_user_mode(user_id, "rust")
+        response = await process_message(
+            user_id, "What is my current Rust topic and progress?", chat_id
         )
-        output = response.get("output", "Could not retrieve progress.")
         await update.message.reply_text(
-            telegramify_markdown.markdownify(output), parse_mode=ParseMode.MARKDOWN_V2
+            telegramify_markdown.markdownify(response), parse_mode=ParseMode.MARKDOWN_V2
         )
     except Exception as e:
         logger.error(f"Rust progress error: {e}")
@@ -310,20 +287,17 @@ async def rust_restart_command(update: Update, context: ContextTypes.DEFAULT_TYP
 async def rust_restart_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle confirmation for rust restart."""
     if update.message.text.lower() == "yes":
-        user_id = update.effective_user.id
-        user_persona = user_modes.get(user_id, DEFAULT_PERSONA)
-
-        if user_persona not in personas:
-            user_persona = DEFAULT_PERSONA
+        user_id = str(update.effective_user.id)
+        chat_id = str(update.effective_chat.id)
 
         try:
-            executor = personas[user_persona].executor
-            response = await executor.ainvoke(
-                {"input": "Reset my Rust progress to the beginning"}
+            # Ensure user is in rust mode
+            set_user_mode(user_id, "rust")
+            response = await process_message(
+                user_id, "Reset my Rust progress to the beginning", chat_id
             )
-            output = response.get("output", "🦀 Rust progress reset!")
             await update.message.reply_text(
-                telegramify_markdown.markdownify(output),
+                telegramify_markdown.markdownify(response),
                 parse_mode=ParseMode.MARKDOWN_V2,
             )
         except Exception as e:
@@ -340,26 +314,20 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.message is None:
         return
 
-    user_id = update.effective_user.id
+    user_id = str(update.effective_user.id)
+    chat_id = str(update.effective_chat.id)
     text = update.message.text
 
     logger.info(f"Received message: {text} from {update.effective_user}")
 
-    user_persona_name = user_modes.get(user_id, DEFAULT_PERSONA)
-    if user_persona_name not in personas:
-        user_persona_name = DEFAULT_PERSONA
-
-    user_agent_executor = personas[user_persona_name].executor
-
     try:
-        response = await user_agent_executor.ainvoke({"input": text})
-        output = response.get("output")
-        if output:
+        response = await process_message(user_id, text, chat_id)
+        if response:
             await send_long_message(
-                update.message, telegramify_markdown.markdownify(output)
+                update.message, telegramify_markdown.markdownify(response)
             )
     except Exception as e:
-        logger.error(f"Agent error for persona {user_persona_name}: {e}")
+        logger.error(f"Agent error: {e}")
         await update.message.reply_text(
             "I'm having a bit of trouble thinking right now. Please try again."
         )
